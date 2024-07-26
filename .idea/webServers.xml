@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="5784b29d-3591-4b28-a34b-004582ab6898" name="SynDiff">
+        <fileTransfer rootFolder="/home/supermicro/zyx/code" accessType="SFTP" host="172.20.137.43" port="50003" sshConfigId="2f5d49bd-d7da-4c40-a848-a61bee71f8c1" sshConfig="supermicro@172.20.137.43:50003 password">
+          <advancedOptions>
+            <advancedOptions controlEncoding="UTF-8" dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>
