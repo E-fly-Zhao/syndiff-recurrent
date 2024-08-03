@@ -90,6 +90,7 @@ class Diffusion_Coefficients():
         self.a_s_cum = self.a_s_cum.to(device)
         self.sigmas_cum = self.sigmas_cum.to(device)
         self.a_s_prev = self.a_s_prev.to(device)
+
     
 def q_sample(coeff, x_start, t, *, noise=None):
     # 对数据进行扩散过程的采样。t=0表示数据已经被扩散了t步
