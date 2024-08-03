@@ -92,6 +92,8 @@ class Diffusion_Coefficients():
         self.a_s_prev = self.a_s_prev.to(device)
     
 def q_sample(coeff, x_start, t, *, noise=None):
+    # 对数据进行扩散过程的采样。t=0表示数据已经被扩散了t步
+    # coeff包含扩散过程中的系数，x_start为原始数据（未扩散前），noise：可选的噪声，如果没有提供，则生成与 x_start 形状相同的高斯噪声
     """
     Diffuse the data (t == 0 means diffused for t step)
     """
@@ -104,6 +106,7 @@ def q_sample(coeff, x_start, t, *, noise=None):
     return x_t
 
 def q_sample_pairs(coeff, x_start, t):
+    # 生成一对扰动后的图像用于训练
     """
     Generate a pair of disturbed images for training
     :param x_start: x_0
@@ -118,31 +121,33 @@ def q_sample_pairs(coeff, x_start, t):
     return x_t, x_t_plus_one
 #%% posterior sampling
 class Posterior_Coefficients():
+    # 计算扩散过程中的后验系数
     def __init__(self, args, device):
         
-        _, _, self.betas = get_sigma_schedule(args, device=device)
+        _, _, self.betas = get_sigma_schedule(args, device=device)      # 从 get_sigma_schedule 中获取 betas，并去掉第一个元素
         
         #we don't need the zeros
         self.betas = self.betas.type(torch.float32)[1:]
         
-        self.alphas = 1 - self.betas
+        self.alphas = 1 - self.betas                            # 计算 alphas 及其累积乘积 alphas_cumprod 和前一步的累积乘积 alphas_cumprod_prev
         self.alphas_cumprod = torch.cumprod(self.alphas, 0)
         self.alphas_cumprod_prev = torch.cat(
                                     (torch.tensor([1.], dtype=torch.float32,device=device), self.alphas_cumprod[:-1]), 0
                                         )               
-        self.posterior_variance = self.betas * (1 - self.alphas_cumprod_prev) / (1 - self.alphas_cumprod)
+        self.posterior_variance = self.betas * (1 - self.alphas_cumprod_prev) / (1 - self.alphas_cumprod)       # 计算后验方差
         
-        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
+        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)              # 计算 alphas_cumprod 的平方根、倒数平方根和倒数平方根减1
         self.sqrt_recip_alphas_cumprod = torch.rsqrt(self.alphas_cumprod)
         self.sqrt_recipm1_alphas_cumprod = torch.sqrt(1 / self.alphas_cumprod - 1)
         
-        self.posterior_mean_coef1 = (self.betas * torch.sqrt(self.alphas_cumprod_prev) / (1 - self.alphas_cumprod))
+        self.posterior_mean_coef1 = (self.betas * torch.sqrt(self.alphas_cumprod_prev) / (1 - self.alphas_cumprod))     # 计算后验均值的两个系数
         self.posterior_mean_coef2 = ((1 - self.alphas_cumprod_prev) * torch.sqrt(self.alphas) / (1 - self.alphas_cumprod))
         
-        self.posterior_log_variance_clipped = torch.log(self.posterior_variance.clamp(min=1e-20))
-        
-def sample_posterior(coefficients, x_0,x_t, t):
-    
+        self.posterior_log_variance_clipped = torch.log(self.posterior_variance.clamp(min=1e-20))   # 计算后验方差的对数并进行裁剪
+
+
+def sample_posterior(coefficients, x_0, x_t, t):
+    # 从后验分布中采样，coefficients为后验系数
     def q_posterior(x_0, x_t, t):
         mean = (
             extract(coefficients.posterior_mean_coef1, t, x_t.shape) * x_0
@@ -167,6 +172,7 @@ def sample_posterior(coefficients, x_0,x_t, t):
     return sample_x_pos
 
 def sample_from_model(coefficients, generator, n_time, x_init, T, opt):
+    # 从生成模型中采样，n_time：时间步数，x_init：初始数据，opt：配置参数
     x = x_init[:,[0],:]
     source = x_init[:,[1],:]
     with torch.no_grad():
@@ -195,7 +201,8 @@ def train_syndiff(rank, gpu, args):
     from utils.EMA import EMA
     
     #rank = args.node_rank * args.num_process_per_node + gpu
-    
+
+    # 初始化随机种子和设备
     torch.manual_seed(args.seed + rank)
     torch.cuda.manual_seed(args.seed + rank)
     torch.cuda.manual_seed_all(args.seed + rank)
@@ -203,14 +210,14 @@ def train_syndiff(rank, gpu, args):
     
     batch_size = args.batch_size
     
-    nz = args.nz #latent dimension
-    
+    nz = args.nz # 设置latent dimension
 
+    # 设置训练集和验证集
     dataset = CreateDatasetSynthesis(phase = "train", input_path = args.input_path, contrast1 = args.contrast1, contrast2 = args.contrast2)
     dataset_val = CreateDatasetSynthesis(phase = "val", input_path = args.input_path, contrast1 = args.contrast1, contrast2 = args.contrast2 )
 
 
-    
+    # 创建数据加载器
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset,
                                                                     num_replicas=args.world_size,
                                                                     rank=rank)      #分布式训练
@@ -232,16 +239,16 @@ def train_syndiff(rank, gpu, args):
                                                sampler=val_sampler,
                                                drop_last = True)
 
+    # 初始化验证损失及PSNR
     val_l1_loss=np.zeros([2,args.num_epoch,len(data_loader_val)])
     val_psnr_values=np.zeros([2,args.num_epoch,len(data_loader_val)])
     print('train data size:'+str(len(data_loader)))
     print('val data size:'+str(len(data_loader_val)))
-    to_range_0_1 = lambda x: (x + 1.) / 2.
+    to_range_0_1 = lambda x: (x + 1.) / 2.  # 将输入的数据从 [-1, 1] 范围映射到 [0, 1] 范围
 
 
-    '''
-    定义generator和discriminator
-    '''
+
+    # 定义generator和discriminator
     #networks performing reverse denoising
     gen_diffusive_1 = NCSNpp(args).to(device)       #Gθ1
     gen_diffusive_2 = NCSNpp(args).to(device)       #Gθ2
@@ -260,6 +267,7 @@ def train_syndiff(rank, gpu, args):
     disc_non_diffusive_cycle1 = backbones.generator_resnet.define_D(gpu_ids=[gpu])
     disc_non_diffusive_cycle2 = backbones.generator_resnet.define_D(gpu_ids=[gpu])
     
+    # 广播参数
     broadcast_params(gen_diffusive_1.parameters())
     broadcast_params(gen_diffusive_2.parameters())
     broadcast_params(gen_non_diffusive_1to2.parameters())
@@ -271,6 +279,7 @@ def train_syndiff(rank, gpu, args):
     broadcast_params(disc_non_diffusive_cycle1.parameters())
     broadcast_params(disc_non_diffusive_cycle2.parameters())
     
+    # 定义优化器
     optimizer_disc_diffusive_1 = optim.Adam(disc_diffusive_1.parameters(), lr=args.lr_d, betas = (args.beta1, args.beta2))
     optimizer_disc_diffusive_2 = optim.Adam(disc_diffusive_2.parameters(), lr=args.lr_d, betas = (args.beta1, args.beta2))
     
@@ -283,12 +292,14 @@ def train_syndiff(rank, gpu, args):
     optimizer_disc_non_diffusive_cycle1 = optim.Adam(disc_non_diffusive_cycle1.parameters(), lr=args.lr_d, betas = (args.beta1, args.beta2))
     optimizer_disc_non_diffusive_cycle2 = optim.Adam(disc_non_diffusive_cycle2.parameters(), lr=args.lr_d, betas = (args.beta1, args.beta2))    
     
+    # 如果使用EMA（指数移动平均），则对生成器的优化器进行包装
     if args.use_ema:
         optimizer_gen_diffusive_1 = EMA(optimizer_gen_diffusive_1, ema_decay=args.ema_decay)
         optimizer_gen_diffusive_2 = EMA(optimizer_gen_diffusive_2, ema_decay=args.ema_decay)
         optimizer_gen_non_diffusive_1to2 = EMA(optimizer_gen_non_diffusive_1to2, ema_decay=args.ema_decay)
         optimizer_gen_non_diffusive_2to1 = EMA(optimizer_gen_non_diffusive_2to1, ema_decay=args.ema_decay)
         
+    # 定义学习率调度器
     scheduler_gen_diffusive_1 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_gen_diffusive_1, args.num_epoch, eta_min=1e-5)
     scheduler_gen_diffusive_2 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_gen_diffusive_2, args.num_epoch, eta_min=1e-5)
     scheduler_gen_non_diffusive_1to2 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_gen_non_diffusive_1to2, args.num_epoch, eta_min=1e-5)
@@ -300,10 +311,8 @@ def train_syndiff(rank, gpu, args):
     scheduler_disc_non_diffusive_cycle1 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_disc_non_diffusive_cycle1, args.num_epoch, eta_min=1e-5)
     scheduler_disc_non_diffusive_cycle2 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_disc_non_diffusive_cycle2, args.num_epoch, eta_min=1e-5)
     
-    
-    '''
-    使用 nn.parallel.DistributedDataParallel 将模型包装成分布式数据并行模块，以支持多 GPU 训练
-    '''
+
+    # 使用 nn.parallel.DistributedDataParallel 将模型包装成分布式数据并行模块，以支持多 GPU 训练
     #ddp
     gen_diffusive_1 = nn.parallel.DistributedDataParallel(gen_diffusive_1, device_ids=[gpu])
     gen_diffusive_2 = nn.parallel.DistributedDataParallel(gen_diffusive_2, device_ids=[gpu])
@@ -315,6 +324,7 @@ def train_syndiff(rank, gpu, args):
     disc_non_diffusive_cycle1 = nn.parallel.DistributedDataParallel(disc_non_diffusive_cycle1, device_ids=[gpu])
     disc_non_diffusive_cycle2 = nn.parallel.DistributedDataParallel(disc_non_diffusive_cycle2, device_ids=[gpu])
     
+    # 初始化实验路径和参数
     exp = args.exp
     output_path = args.output_path
 
@@ -326,10 +336,12 @@ def train_syndiff(rank, gpu, args):
             shutil.copytree('./backbones', os.path.join(exp_path, 'backbones'))
     
     
+    # 初始化后验和扩散系数
     coeff = Diffusion_Coefficients(args, device)
     pos_coeff = Posterior_Coefficients(args, device)
     T = get_time_schedule(args, device)
     
+    # 若要回复训练，则加载检查点
     if args.resume:
         checkpoint_file = os.path.join(exp_path, 'content.pth')
         checkpoint = torch.load(checkpoint_file, map_location=device)
@@ -373,9 +385,11 @@ def train_syndiff(rank, gpu, args):
     
     
     for epoch in range(init_epoch, args.num_epoch+1):
+        # 为当前epoch设置数据采样器，并在每次迭代中从data_loader中加载一批数据x1和x2
         train_sampler.set_epoch(epoch)
        
         for iteration, (x1, x2) in enumerate(data_loader):
+            # 启用所有判别器的参数更新，并将它们的梯度清零。
             for p in disc_diffusive_1.parameters():  
                 p.requires_grad = True  
             for p in disc_diffusive_2.parameters():  
@@ -388,23 +402,26 @@ def train_syndiff(rank, gpu, args):
             disc_diffusive_1.zero_grad()
             disc_diffusive_2.zero_grad()
             
-            #sample from p(x_0)
+            # sample from p(x_0)
             real_data1 = x1.to(device, non_blocking=True)
             real_data2 = x2.to(device, non_blocking=True)
             
-            #sample t
+            # sample t，随机采样时间步t
             t1 = torch.randint(0, args.num_timesteps, (real_data1.size(0),), device=device)
             t2 = torch.randint(0, args.num_timesteps, (real_data2.size(0),), device=device)
-            #sample x_t and x_tp1
+            # sample x_t and x_tp1，采样q(x_t | x_0) pairs
+            # 将真实数据加载到设备上，并随机采样时间步t1和t2，然后生成x_t和x_tp1样本对
             x1_t, x1_tp1 = q_sample_pairs(coeff, real_data1, t1)
             x1_t.requires_grad = True
             
             x2_t, x2_tp1 = q_sample_pairs(coeff, real_data2, t2)
             x2_t.requires_grad = True               
-            # train discriminator with real                              
+            # train discriminator with real，计算判别器对真实样本的输出和损失，并反向传播损失
+            # 计算discriminator的真实样本输出
             D1_real = disc_diffusive_1(x1_t, t1, x1_tp1.detach()).view(-1)
             D2_real = disc_diffusive_2(x2_t, t2, x2_tp1.detach()).view(-1)   
             
+            # 计算真实样本损失
             errD1_real = F.softplus(-D1_real)
             errD1_real = errD1_real.mean()            
             
@@ -413,6 +430,7 @@ def train_syndiff(rank, gpu, args):
             errD_real = errD1_real + errD2_real
             errD_real.backward(retain_graph=True)
             
+            # 设置梯度惩罚，根据是否设置lazy_reg（懒惰正则化），计算并反向传播梯度惩罚
             if args.lazy_reg is None:
                 grad1_real = torch.autograd.grad(
                             outputs=D1_real.sum(), inputs=x1_t, create_graph=True
@@ -450,6 +468,7 @@ def train_syndiff(rank, gpu, args):
             
     
             # train with fake
+            # 训练discriminator，生成假样本，计算判别器对假样本的输出和损失，并反向传播损失，更新判别器
             latent_z1 = torch.randn(batch_size, nz, device=device)
             latent_z2 = torch.randn(batch_size, nz, device=device)
             
@@ -476,6 +495,7 @@ def train_syndiff(rank, gpu, args):
             optimizer_disc_diffusive_2.step()  
 
             #D for cycle part
+            # 循环一致discriminator的训练，训练循环一致性判别器，计算并反向传播损失，更新判别器
             disc_non_diffusive_cycle1.zero_grad()
             disc_non_diffusive_cycle2.zero_grad()
             
@@ -514,7 +534,8 @@ def train_syndiff(rank, gpu, args):
             optimizer_disc_non_diffusive_cycle1.step()
             optimizer_disc_non_diffusive_cycle2.step() 
 
-            #G part
+            # G part，训练generator，生成假样本并计算生成器的损失，更新生成器参数
+            # 禁用判别器的参数更新
             for p in disc_diffusive_1.parameters():
                 p.requires_grad = False
             for p in disc_diffusive_2.parameters():
@@ -596,10 +617,12 @@ def train_syndiff(rank, gpu, args):
             optimizer_gen_non_diffusive_2to1.step()           
             
             global_step += 1
+            # 每500次迭代打印损失，并记录到TensorBoard，同时保存模型
             if iteration % 100 == 0:
                 if rank == 0:
                     print('epoch {} iteration{}, G-Cycle: {}, G-L1: {}, G-Adv: {}, G-cycle-Adv: {}, G-Sum: {}, D Loss: {}, D_cycle Loss: {}'.format(epoch,iteration, errG_cycle.item(), errG_L1.item(),  errG_adv.item(), errG_cycle_adv.item(), errG.item(), errD.item(), errD_cycle.item()))
         
+        # 调整学习率，如果没有禁用学习率衰减，则调用学习率调度器的step()方法来更新学习率。不同的生成器和判别器各自对应不同的学习率调度器
         if not args.no_lr_decay:
             
             scheduler_gen_diffusive_1.step()
@@ -612,6 +635,7 @@ def train_syndiff(rank, gpu, args):
             scheduler_disc_non_diffusive_cycle1.step()
             scheduler_disc_non_diffusive_cycle2.step()
         
+        # 生成和保存图像样本，每十个epoch保存一次生成的图像样本。包括生成的中间样本和最终样本，并将其保存为图像文件
         if rank == 0:
             if epoch % 10 == 0:
                 torchvision.utils.save_image(x1_pos_sample, os.path.join(exp_path, 'xpos1_epoch_{}.png'.format(epoch)), normalize=True)
@@ -642,6 +666,8 @@ def train_syndiff(rank, gpu, args):
             pred2 = torch.cat((real_data1, pred2, gen_non_diffusive_2to1(pred2), fake_sample1_tilda[:,[0],:]),axis=-1)
             torchvision.utils.save_image(pred2, os.path.join(exp_path, 'sample2_translated_epoch_{}.png'.format(epoch)), normalize=True)
            
+            # 保存模型状态和检查点，每隔一定epoch保存模型状态，包括生成器和判别器的状态字典、优化器状态字典以及学习率调度器状态字典。
+            # 如果使用EMA（指数移动平均），则在保存模型前交换参数
             if args.save_content:
                 if epoch % args.save_content_every == 0:
                     print('Saving content.')
@@ -678,7 +704,8 @@ def train_syndiff(rank, gpu, args):
                     optimizer_gen_non_diffusive_2to1.swap_parameters_with_ema(store_params_in_ema=True)
 
 
-        for iteration, (x_val , y_val) in enumerate(data_loader_val): 
+        # 计算和保存验证损失，在验证集上计算L1损失和PSNR（峰值信噪比），并将其保存为numpy文件
+        for iteration, (x_val , y_val) in enumerate(data_loader_val):
         
             real_data = x_val.to(device, non_blocking=True)
             source_data = y_val.to(device, non_blocking=True)
@@ -722,14 +749,14 @@ def train_syndiff(rank, gpu, args):
 
 def init_processes(rank, size, fn, args):
     """ Initialize the distributed environment. """
-    os.environ['MASTER_ADDR'] = args.master_address
-    os.environ['MASTER_PORT'] = args.port_num
+    os.environ['MASTER_ADDR'] = args.master_address     # 指定分布式训练的主节点地址
+    os.environ['MASTER_PORT'] = args.port_num           # 指定分布式训练端口
     torch.cuda.set_device(args.local_rank)
     gpu = args.local_rank
     dist.init_process_group(backend='nccl', init_method='env://', rank=rank, world_size=size)
     fn(rank, gpu, args)
-    dist.barrier()
-    cleanup()  
+    dist.barrier()      # 确保所有进程同步
+    cleanup()           # 销毁进程组
 
 def cleanup():
     dist.destroy_process_group()    
@@ -845,10 +872,10 @@ if __name__ == '__main__':
 
    
     args = parser.parse_args()
-    args.world_size = args.num_proc_node * args.num_process_per_node
-    size = args.num_process_per_node
+    args.world_size = args.num_proc_node * args.num_process_per_node        # 全局进程数量
+    size = args.num_process_per_node                                        # 每个节点的进程数量
 
-    if size > 1:
+    if size > 1:        # 需要启动多个进程来进行分布式训练
         processes = []
         for rank in range(size):
             args.local_rank = rank
