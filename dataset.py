@@ -1,5 +1,6 @@
 import torch.utils.data
 import numpy as np, h5py
+import os
 import random
 
 
@@ -17,6 +18,7 @@ def CreateDatasetSynthesis(phase, input_path, contrast1 = 'T1', contrast2 = 'T2'
 
     '''
 
+    os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
     target_file = input_path + "/data_{}_{}.mat".format(phase, contrast1)
     data_fs_s1=LoadDataSet(target_file)
 
@@ -42,6 +44,7 @@ def LoadDataSet(load_dir, variable = 'data_fs', padding = True, Norm = True):
     Returns:
 
     '''
+    os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
     f = h5py.File(load_dir,'r')
     if np.array(f[variable]).ndim==3:
         data=np.expand_dims(np.transpose(np.array(f[variable]),(0,2,1)),axis=1)
