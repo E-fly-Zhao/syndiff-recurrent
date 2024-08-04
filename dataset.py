@@ -32,40 +32,28 @@ def CreateDatasetSynthesis(phase, input_path, contrast1='T1', contrast2='T2'):
     return dataset
 
 
-def LoadDataSet(load_dir, variable='data_fs', padding=True, Norm=True):
+def LoadDataSet(load_dir, variable='data', padding=True, Norm=True):
     '''
     加载数据集并对其进行预处理
     Args:
         load_dir: 数据文件的路径
-        variable: 要加载的数据变量名（默认 'data_fs'）
+        variable: 要加载的数据变量名（默认 'data'）
         padding: 是否对图像进行填充以达到 256x256 的大小（默认 True）
         Norm: 是否对数据进行归一化（默认 True）
 
     Returns:
-        data: 处理后的数据
+        处理后的数据
     '''
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
-    print(f"Opening file: {load_dir}")
-    try:
-        f = h5py.File(load_dir, 'r')
-    except Exception as e:
-        print(f"Failed to open file {load_dir}: {e}")
-        raise
+    with h5py.File(load_dir, 'r') as f:
+        data = np.array(f[variable])
 
-    if variable not in f:
-        print(f"Variable '{variable}' not found in file {load_dir}")
-        raise KeyError(f"Variable '{variable}' not found in file {load_dir}")
-
-    data_array = np.array(f[variable])
-    print(f"Loaded array with shape: {data_array.shape}")
-
-    if data_array.ndim == 3:
-        data = np.expand_dims(np.transpose(data_array, (0, 2, 1)), axis=1)
+    if np.ndim(data) == 3:
+        data = np.expand_dims(np.transpose(data, (0, 2, 1)), axis=1)
     else:
-        data = np.transpose(data_array, (1, 0, 3, 2))
+        data = np.transpose(data, (1, 0, 3, 2))
 
     data = data.astype(np.float32)
-    print(f"Data after transpose and expand_dims has shape: {data.shape}")
 
     if padding:
         pad_x = int((256 - data.shape[2]) / 2)
@@ -76,7 +64,6 @@ def LoadDataSet(load_dir, variable='data_fs', padding=True, Norm=True):
     if Norm:
         data = (data - 0.5) / 0.5
 
-    print(f"Data after padding and normalization has shape: {data.shape}")
     return data
 # import torch.utils.data
 # import numpy as np
