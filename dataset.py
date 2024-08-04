@@ -18,16 +18,22 @@ def CreateDatasetSynthesis(phase, input_path, contrast1='T1', contrast2='T2'):
     '''
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
-    target_file = os.path.join(input_path, f"data_{phase}_{contrast1}.mat")
+    # 构建文件路径
+    target_file = os.path.join(input_path, f"data_{phase}_{contrast1}.h5")
     print(f"Loading data from: {target_file}")
+
+    # 从HDF5文件中加载数据
     data_fs_s1 = LoadDataSet(target_file)
     print(f"Loaded data_fs_s1 with shape: {data_fs_s1.shape}")
 
-    target_file = os.path.join(input_path, f"data_{phase}_{contrast2}.mat")
+    target_file = os.path.join(input_path, f"data_{phase}_{contrast2}.h5")
     print(f"Loading data from: {target_file}")
+
+    # 从HDF5文件中加载数据
     data_fs_s2 = LoadDataSet(target_file)
     print(f"Loaded data_fs_s2 with shape: {data_fs_s2.shape}")
 
+    # 创建PyTorch数据集
     dataset = torch.utils.data.TensorDataset(torch.from_numpy(data_fs_s1), torch.from_numpy(data_fs_s2))
     return dataset
 
