@@ -42,11 +42,12 @@ t1_files = sorted([f for f in os.listdir(ixi_t1_dir) if f.endswith('.nii.gz')])
 t2_files = sorted([f for f in os.listdir(ixi_t2_dir) if f.endswith('.nii.gz')])
 
 # 提取共有文件名
-common_files = set(f.replace('-T1', '') for f in t1_files).intersection(f.replace('-T2', '') for f in t2_files)
+common_files = set(f.replace('-T1.nii.gz', '') for f in t1_files).intersection(
+    f.replace('-T2.nii.gz', '') for f in t2_files)
 
 
 # 按范围选择文件
-def get_file_names(files, common_files, start, end, suffix):
+def get_file_names(common_files, start, end, suffix):
     return [f"{name}{suffix}.nii.gz" for name in sorted(common_files)[start:end]]
 
 
@@ -55,8 +56,8 @@ ranges = [(0, 25), (25, 30), (30, 40)]
 
 # 处理对比度1和对比度2的文件
 for i, (start, end) in enumerate(ranges):
-    t1_selected_files = get_file_names(t1_files, common_files, start, end, '-T1')
-    t2_selected_files = get_file_names(t2_files, common_files, start, end, '-T2')
+    t1_selected_files = get_file_names(common_files, start, end, '-T1')
+    t2_selected_files = get_file_names(common_files, start, end, '-T2')
 
     process_data(ixi_t1_dir, t1_selected_files, os.path.join(base_dir,
                                                              f"data_train_contrast1.mat" if i == 0 else f"data_val_contrast1.mat" if i == 1 else f"data_test_contrast1.mat"))
